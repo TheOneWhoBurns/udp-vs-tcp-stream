@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UDP vs TCP Stream</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0a;color:#ccc;font-family:'Courier New',monospace;min-height:100vh;display:flex;flex-direction:column}
+#clock{text-align:center;padding:10px;font-size:28px;color:#0f0;background:#111;border-bottom:1px solid #222}
+#setup{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;gap:16px;padding:24px}
+#setup img{border:4px solid #222;border-radius:8px}
+#setup a{color:#0af;font-size:14px;word-break:break-all}
+#setup .hint{color:#666;font-size:13px}
+#streams{display:none;flex:1;flex-direction:row;gap:2px;padding:2px}
+.panel{flex:1;display:flex;flex-direction:column;background:#111;border-radius:4px;overflow:hidden}
+.panel-header{padding:6px 12px;font-size:13px;font-weight:bold;display:flex;justify-content:space-between;align-items:center}
+.udp .panel-header{background:#1a3a1a;color:#4c4}
+.tcp .panel-header{background:#1a1a3a;color:#66f}
+.panel video{width:100%;background:#000;flex:1;min-height:0;object-fit:contain}
+.stats{padding:6px 10px;font-size:10px;line-height:1.5;background:#0d0d0d;border-top:1px solid #222}
+.stats div{display:flex;justify-content:space-between}
+.stats .label{color:#888}
+.stats .value{color:#eee}
+.stats .value.good{color:#4c4}
+.stats .value.warn{color:#fc4}
+.stats .value.bad{color:#f44}
+.section-label{color:#555;font-size:9px;text-transform:uppercase;letter-spacing:1px;padding:4px 0 2px;border-top:1px solid #1a1a1a;margin-top:2px}
+#bottom{display:none;background:#111;border-top:1px solid #222;padding:8px 12px}
+#delta-bar{text-align:center;font-size:15px;margin-bottom:6px}
+#delta-bar .faster{color:#0f0}
+#delta-bar .slower{color:#f44}
+#summary-stats{display:flex;justify-content:space-around;font-size:11px;gap:12px;flex-wrap:wrap}
+#summary-stats .col{text-align:center}
+#summary-stats .big{font-size:18px;font-weight:bold}
+#summary-stats .lbl{color:#666;font-size:9px;text-transform:uppercase}
+.udp-color{color:#4c4}
+.tcp-color{color:#66f}
+#latency-graph{width:100%;height:60px;margin-top:6px;border:1px solid #222;border-radius:3px;background:#0a0a0a}
+</style>
+</head>
+<body>
+<div id="clock">--:--:--.---</div>
+
+<div id="setup">
+  <img id="qr" src="/qr" width="240" height="240" alt="QR Code">
+  <a id="broadcast-link" href="#" target="_blank"></a>
+  <div class="hint">Scan QR code with phone to start broadcasting</div>
+</div>
+
+<div id="streams">
+  <div class="panel udp">
+    <div class="panel-header"><span>UDP (WebRTC)</span><span id="udp-status">waiting</span></div>
+    <video id="udp-video" autoplay playsinline muted></video>
+    <div class="stats" id="udp-stats">
+      <div class="section-label">Transport</div>
+      <div><span class="label">Packets recv</span><span class="value" id="s-pkts">-</span></div>
+      <div><span class="label">Packets lost</span><span class="value" id="s-lost">-</span></div>
+      <div><span class="label">Loss rate</span><span class="value" id="s-lossrate">-</span></div>
+      <div><span class="label">Bytes recv</span><span class="value" id="s-bytes">-</span></div>
+      <div><span class="label">Bitrate</span><span class="value" id="s-bitrate">-</span></div>
+      <div class="section-label">Timing</div>
+      <div><span class="label">RTT</span><span class="value" id="s-rtt">-</span></div>
+      <div><span class="label">Est. latency</span><span class="value" id="s-latency">-</span></div>
+      <div><span class="label">Jitter</span><span class="value" id="s-jitter">-</span></div>
+      <div><span class="label">Avg latency</span><span class="value" id="s-avglat">-</span></div>
+      <div><span class="label">Peak latency</span><span class="value" id="s-peaklat">-</span></div>
+      <div class="section-label">Video</div>
+      <div><span class="label">FPS</span><span class="value" id="s-fps">-</span></div>
+      <div><span class="label">Frames decoded</span><span class="value" id="s-frames">-</span></div>
+      <div><span class="label">Frames dropped</span><span class="value" id="s-fdrop">-</span></div>
+      <div><span class="label">Nack sent</span><span class="value" id="s-nack">-</span></div>
+      <div><span class="label">PLI sent</span><span class="value" id="s-pli">-</span></div>
+    </div>
+  </div>
+  <div class="panel tcp">
+    <div class="panel-header"><span>TCP (WebSocket + MSE)</span><span id="tcp-status">waiting</span></div>
+    <video id="tcp-video" autoplay playsinline muted></video>
+    <div class="stats" id="tcp-stats">
+      <div class="section-label">Transport</div>
+      <div><span class="label">Chunks recv</span><span class="value" id="t-chunks">-</span></div>
+      <div><span class="label">Chunk size avg</span><span class="value" id="t-chunkavg">-</span></div>
+      <div><span class="label">Bytes recv</span><span class="value" id="t-bytes">-</span></div>
+      <div><span class="label">Bitrate</span><span class="value" id="t-bitrate">-</span></div>
+      <div><span class="label">Dropped chunks</span><span class="value" id="t-dropped">-</span></div>
+      <div class="section-label">Timing</div>
+      <div><span class="label">Chunk latency</span><span class="value" id="t-latency">-</span></div>
+      <div><span class="label">Avg latency</span><span class="value" id="t-avglat">-</span></div>
+      <div><span class="label">Peak latency</span><span class="value" id="t-peaklat">-</span></div>
+      <div><span class="label">Min latency</span><span class="value" id="t-minlat">-</span></div>
+      <div><span class="label">Jitter (std dev)</span><span class="value" id="t-jitter">-</span></div>
+      <div class="section-label">Playback</div>
+      <div><span class="label">Buffer level</span><span class="value" id="t-buffer">-</span></div>
+      <div><span class="label">Seek corrections</span><span class="value" id="t-seeks">-</span></div>
+      <div><span class="label">Playback rate</span><span class="value" id="t-rate">-</span></div>
+      <div><span class="label">Buffer stalls</span><span class="value" id="t-stalls">-</span></div>
+    </div>
+  </div>
+</div>
+
+<div id="bottom">
+  <div id="delta-bar">Latency delta: <span id="delta-value">measuring...</span></div>
+  <div id="summary-stats">
+    <div class="col"><div class="big udp-color" id="sum-udp-lat">-</div><div class="lbl">UDP latency</div></div>
+    <div class="col"><div class="big tcp-color" id="sum-tcp-lat">-</div><div class="lbl">TCP latency</div></div>
+    <div class="col"><div class="big" id="sum-ratio">-</div><div class="lbl">TCP / UDP ratio</div></div>
+    <div class="col"><div class="big" id="sum-timelost">-</div><div class="lbl">Extra TCP delay (cumul.)</div></div>
+    <div class="col"><div class="big" id="sum-pktloss">-</div><div class="lbl">UDP pkt loss</div></div>
+    <div class="col"><div class="big" id="sum-uptime">-</div><div class="lbl">Session time</div></div>
+  </div>
+  <canvas id="latency-graph"></canvas>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+const base = `${proto}://${location.host}`;
+
+let pc, signalWs, tcpWs;
+let sessionStart = 0;
+
+let udpMetrics = {
+  prevBytes: 0, prevFrames: 0, prevTs: 0,
+  latencySamples: [], peakLat: 0, sumLat: 0, countLat: 0,
+  prevPkts: 0, prevLost: 0, currentLat: 0
+};
+
+let tcpState = {
+  chunks: 0, bytes: 0, lastLatency: 0, dropped: 0, prevBytes: 0, prevTs: 0,
+  latencySamples: [], peakLat: 0, minLat: Infinity, sumLat: 0, countLat: 0,
+  latencySqSum: 0, seekCorrections: 0, stalls: 0, chunkSizes: []
+};
+
+const graphHistory = { udp: [], tcp: [], maxPoints: 120 };
+
+fetch('/broadcast-url').then(r => r.json()).then(d => {
+  $('broadcast-link').href = d.url;
+  $('broadcast-link').textContent = d.url;
+});
+
+function updateClock() {
+  const now = new Date();
+  const ts = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+  $('clock').textContent = ts;
+  requestAnimationFrame(updateClock);
+}
+updateClock();
+
+function showStreams() {
+  $('setup').style.display = 'none';
+  $('streams').style.display = 'flex';
+  $('bottom').style.display = 'block';
+  if (!sessionStart) sessionStart = Date.now();
+}
+
+function hideStreams() {
+  $('setup').style.display = 'flex';
+  $('streams').style.display = 'none';
+  $('bottom').style.display = 'none';
+}
+
+function connectSignal() {
+  signalWs = new WebSocket(`${base}/ws/signal?role=viewer`);
+  signalWs.onclose = () => setTimeout(connectSignal, 2000);
+  signalWs.onmessage = async (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'peer_joined') {
+      showStreams();
+      $('udp-status').textContent = 'connecting';
+    } else if (msg.type === 'peer_left') {
+      hideStreams();
+      $('udp-status').textContent = 'disconnected';
+      if (pc) { pc.close(); pc = null; }
+    } else if (msg.type === 'offer') {
+      await handleOffer(msg);
+    } else if (msg.type === 'ice') {
+      if (pc && msg.candidate) {
+        try { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch {}
+      }
+    }
+  };
+}
+
+async function handleOffer(offer) {
+  if (pc) pc.close();
+  pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  pc.ontrack = (e) => {
+    $('udp-video').srcObject = e.streams[0];
+    $('udp-status').textContent = 'live';
+  };
+  pc.onicecandidate = (e) => {
+    if (e.candidate && signalWs.readyState === 1) {
+      signalWs.send(JSON.stringify({ type: 'ice', candidate: e.candidate }));
+    }
+  };
+  await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: offer.sdp }));
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  signalWs.send(JSON.stringify({ type: 'answer', sdp: answer.sdp }));
+}
+
+setInterval(async () => {
+  if (!pc) return;
+  try {
+    const stats = await pc.getStats();
+    let rttMs = null;
+    stats.forEach(r => {
+      if (r.type === 'inbound-rtp' && r.kind === 'video') {
+        const recv = r.packetsReceived || 0;
+        const lost = r.packetsLost || 0;
+        $('s-pkts').textContent = recv;
+        $('s-lost').textContent = lost;
+        const total = recv + lost;
+        const lossRate = total > 0 ? ((lost / total) * 100).toFixed(2) + '%' : '0%';
+        $('s-lossrate').textContent = lossRate;
+        colorize('s-lossrate', lost / Math.max(total, 1), 0.01, 0.05);
+
+        $('s-jitter').textContent = r.jitter != null ? (r.jitter * 1000).toFixed(1) + ' ms' : '-';
+        colorize('s-jitter', r.jitter || 0, 0.01, 0.03);
+
+        $('s-frames').textContent = r.framesDecoded || 0;
+        $('s-fdrop').textContent = r.framesDropped || 0;
+        $('s-nack').textContent = r.nackCount || 0;
+        $('s-pli').textContent = r.pliCount || 0;
+
+        const now = Date.now();
+        if (udpMetrics.prevTs) {
+          const dt = (now - udpMetrics.prevTs) / 1000;
+          const df = (r.framesDecoded || 0) - udpMetrics.prevFrames;
+          $('s-fps').textContent = dt > 0 ? (df / dt).toFixed(1) : '-';
+
+          const db = (r.bytesReceived || 0) - udpMetrics.prevBytes;
+          $('s-bitrate').textContent = dt > 0 ? formatBytes(db / dt) + '/s' : '-';
+        }
+        udpMetrics.prevFrames = r.framesDecoded || 0;
+        udpMetrics.prevBytes = r.bytesReceived || 0;
+        udpMetrics.prevTs = now;
+        $('s-bytes').textContent = formatBytes(r.bytesReceived || 0);
+      }
+      if (r.type === 'candidate-pair' && r.state === 'succeeded') {
+        if (r.currentRoundTripTime != null) {
+          rttMs = r.currentRoundTripTime * 1000;
+          $('s-rtt').textContent = rttMs.toFixed(0) + ' ms';
+        }
+      }
+    });
+
+    if (rttMs != null) {
+      const estLat = rttMs / 2 + 16;
+      udpMetrics.currentLat = estLat;
+      $('s-latency').textContent = estLat.toFixed(0) + ' ms';
+      colorize('s-latency', estLat, 50, 150);
+
+      udpMetrics.sumLat += estLat;
+      udpMetrics.countLat++;
+      if (estLat > udpMetrics.peakLat) udpMetrics.peakLat = estLat;
+      $('s-avglat').textContent = (udpMetrics.sumLat / udpMetrics.countLat).toFixed(0) + ' ms';
+      $('s-peaklat').textContent = udpMetrics.peakLat.toFixed(0) + ' ms';
+
+      graphHistory.udp.push(estLat);
+      if (graphHistory.udp.length > graphHistory.maxPoints) graphHistory.udp.shift();
+    }
+  } catch {}
+}, 1000);
+
+let mediaSource, sourceBuffer, mimeType, pendingChunks = [], nextTimestamp = 0;
+
+function connectTcp() {
+  tcpWs = new WebSocket(`${base}/ws/tcp?role=viewer`);
+  tcpWs.binaryType = 'arraybuffer';
+  tcpWs.onclose = () => setTimeout(connectTcp, 2000);
+  tcpWs.onmessage = (e) => {
+    if (typeof e.data === 'string') {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'peer_joined') {
+        showStreams();
+        $('tcp-status').textContent = 'connecting';
+      } else if (msg.type === 'peer_left') {
+        $('tcp-status').textContent = 'disconnected';
+        resetMse();
+      } else if (msg.type === 'codec') {
+        setupMse(msg.mimeType);
+      } else if (msg.type === 'ts') {
+        nextTimestamp = msg.t;
+      }
+    } else {
+      handleTcpChunk(e.data);
+    }
+  };
+}
+
+function setupMse(mime) {
+  resetMse();
+  mimeType = mime;
+  if (!MediaSource.isTypeSupported(mime)) {
+    $('tcp-status').textContent = 'unsupported codec';
+    return;
+  }
+  mediaSource = new MediaSource();
+  $('tcp-video').src = URL.createObjectURL(mediaSource);
+  mediaSource.addEventListener('sourceopen', () => {
+    try {
+      sourceBuffer = mediaSource.addSourceBuffer(mime);
+      sourceBuffer.mode = 'sequence';
+      sourceBuffer.addEventListener('updateend', flushPending);
+      $('tcp-status').textContent = 'buffering';
+    } catch (e) {
+      $('tcp-status').textContent = 'MSE error';
+    }
+  });
+}
+
+function resetMse() {
+  pendingChunks = [];
+  if (mediaSource && mediaSource.readyState === 'open') {
+    try { mediaSource.endOfStream(); } catch {}
+  }
+  mediaSource = null;
+  sourceBuffer = null;
+}
+
+$('tcp-video').addEventListener('waiting', () => { tcpState.stalls++; });
+
+function handleTcpChunk(data) {
+  tcpState.chunks++;
+  tcpState.bytes += data.byteLength;
+  tcpState.chunkSizes.push(data.byteLength);
+  if (tcpState.chunkSizes.length > 50) tcpState.chunkSizes.shift();
+
+  if (nextTimestamp) {
+    const lat = Date.now() - nextTimestamp;
+    tcpState.lastLatency = lat;
+    tcpState.sumLat += lat;
+    tcpState.latencySqSum += lat * lat;
+    tcpState.countLat++;
+    if (lat > tcpState.peakLat) tcpState.peakLat = lat;
+    if (lat < tcpState.minLat) tcpState.minLat = lat;
+
+    graphHistory.tcp.push(lat);
+    if (graphHistory.tcp.length > graphHistory.maxPoints) graphHistory.tcp.shift();
+
+    nextTimestamp = 0;
+  }
+
+  $('t-chunks').textContent = tcpState.chunks;
+  $('t-bytes').textContent = formatBytes(tcpState.bytes);
+  $('t-latency').textContent = tcpState.lastLatency + ' ms';
+  colorize('t-latency', tcpState.lastLatency, 200, 500);
+
+  const avgChunk = tcpState.chunkSizes.reduce((a, b) => a + b, 0) / tcpState.chunkSizes.length;
+  $('t-chunkavg').textContent = formatBytes(avgChunk);
+
+  if (tcpState.countLat > 0) {
+    const avg = tcpState.sumLat / tcpState.countLat;
+    $('t-avglat').textContent = avg.toFixed(0) + ' ms';
+    $('t-peaklat').textContent = tcpState.peakLat + ' ms';
+    $('t-minlat').textContent = tcpState.minLat === Infinity ? '-' : tcpState.minLat + ' ms';
+    const variance = (tcpState.latencySqSum / tcpState.countLat) - (avg * avg);
+    $('t-jitter').textContent = Math.sqrt(Math.max(0, variance)).toFixed(1) + ' ms';
+  }
+
+  $('t-stalls').textContent = tcpState.stalls;
+
+  if (!sourceBuffer) return;
+  pendingChunks.push(data);
+  flushPending();
+}
+
+function flushPending() {
+  if (!sourceBuffer || sourceBuffer.updating || pendingChunks.length === 0) return;
+  const chunk = pendingChunks.shift();
+  try {
+    sourceBuffer.appendBuffer(chunk);
+  } catch (e) {
+    tcpState.dropped++;
+    $('t-dropped').textContent = tcpState.dropped;
+    pendingChunks = [];
+    return;
+  }
+
+  const vid = $('tcp-video');
+  if (vid.buffered.length > 0) {
+    const end = vid.buffered.end(vid.buffered.length - 1);
+    const start = vid.buffered.start(0);
+    $('t-buffer').textContent = (end - start).toFixed(2) + ' s';
+    $('t-rate').textContent = vid.playbackRate.toFixed(2) + 'x';
+    if (end - vid.currentTime > 1.5) {
+      vid.currentTime = end - 0.3;
+      tcpState.seekCorrections++;
+      $('t-seeks').textContent = tcpState.seekCorrections;
+    }
+    if (start > 0 && !sourceBuffer.updating) {
+      try { sourceBuffer.remove(0, end - 10); } catch {}
+    }
+  }
+
+  if ($('tcp-status').textContent === 'buffering' && vid.buffered.length > 0) {
+    $('tcp-status').textContent = 'live';
+  }
+}
+
+setInterval(() => {
+  const now = Date.now();
+  if (tcpState.prevTs) {
+    const dt = (now - tcpState.prevTs) / 1000;
+    const db = tcpState.bytes - tcpState.prevBytes;
+    $('t-bitrate').textContent = dt > 0 ? formatBytes(db / dt) + '/s' : '-';
+  }
+  tcpState.prevTs = now;
+  tcpState.prevBytes = tcpState.bytes;
+
+  const udpLat = udpMetrics.currentLat;
+  const tcpLat = tcpState.countLat > 0 ? tcpState.sumLat / tcpState.countLat : 0;
+
+  $('sum-udp-lat').textContent = udpLat > 0 ? udpLat.toFixed(0) + ' ms' : '-';
+  $('sum-tcp-lat').textContent = tcpLat > 0 ? tcpLat.toFixed(0) + ' ms' : '-';
+
+  if (udpLat > 0 && tcpLat > 0) {
+    const diff = tcpLat - udpLat;
+    const abs = Math.abs(diff).toFixed(0);
+    const ratio = (tcpLat / udpLat).toFixed(1);
+    $('sum-ratio').textContent = ratio + 'x';
+    $('sum-ratio').style.color = tcpLat > udpLat ? '#f44' : '#4c4';
+
+    if (diff > 5) {
+      $('delta-value').innerHTML = `UDP is <span class="faster">~${abs} ms faster</span>`;
+    } else if (diff < -5) {
+      $('delta-value').innerHTML = `TCP is <span class="faster">~${abs} ms faster</span>`;
+    } else {
+      $('delta-value').textContent = 'roughly equal';
+    }
+
+    if (sessionStart) {
+      const sessionSec = (now - sessionStart) / 1000;
+      const extraDelay = Math.max(0, diff) * sessionSec / 1000;
+      $('sum-timelost').textContent = extraDelay.toFixed(1) + ' s';
+      $('sum-timelost').style.color = extraDelay > 1 ? '#f44' : '#eee';
+    }
+  } else {
+    $('delta-value').textContent = 'measuring...';
+  }
+
+  const totalPkts = parseInt($('s-pkts').textContent) || 0;
+  const lostPkts = parseInt($('s-lost').textContent) || 0;
+  const total = totalPkts + lostPkts;
+  $('sum-pktloss').textContent = total > 0 ? ((lostPkts / total) * 100).toFixed(2) + '%' : '-';
+  $('sum-pktloss').style.color = lostPkts > 0 ? '#fc4' : '#4c4';
+
+  if (sessionStart) {
+    const sec = Math.floor((now - sessionStart) / 1000);
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    $('sum-uptime').textContent = m + ':' + String(s).padStart(2, '0');
+  }
+
+  drawGraph();
+}, 1000);
+
+function drawGraph() {
+  const canvas = $('latency-graph');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * dpr;
+  canvas.height = canvas.clientHeight * dpr;
+  ctx.scale(dpr, dpr);
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+
+  ctx.clearRect(0, 0, w, h);
+
+  const allVals = [...graphHistory.udp, ...graphHistory.tcp];
+  if (allVals.length < 2) return;
+  const maxVal = Math.max(...allVals, 100);
+  const minVal = 0;
+
+  ctx.strokeStyle = '#222';
+  ctx.lineWidth = 0.5;
+  for (let i = 0; i < 4; i++) {
+    const y = h * i / 4;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = '#444';
+  ctx.font = '9px Courier New';
+  ctx.fillText(maxVal.toFixed(0) + 'ms', 2, 10);
+  ctx.fillText((maxVal / 2).toFixed(0) + 'ms', 2, h / 2 + 4);
+
+  function drawLine(data, color) {
+    if (data.length < 2) return;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    const step = w / (graphHistory.maxPoints - 1);
+    const offset = graphHistory.maxPoints - data.length;
+    for (let i = 0; i < data.length; i++) {
+      const x = (i + offset) * step;
+      const y = h - ((data[i] - minVal) / (maxVal - minVal)) * (h - 4) - 2;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  drawLine(graphHistory.udp, '#4c4');
+  drawLine(graphHistory.tcp, '#66f');
+
+  ctx.fillStyle = '#4c4';
+  ctx.fillRect(w - 80, 4, 8, 8);
+  ctx.fillStyle = '#66f';
+  ctx.fillRect(w - 80, 16, 8, 8);
+  ctx.fillStyle = '#888';
+  ctx.font = '9px Courier New';
+  ctx.fillText('UDP', w - 68, 12);
+  ctx.fillText('TCP', w - 68, 24);
+}
+
+function colorize(id, val, warnThresh, badThresh) {
+  const el = $(id);
+  el.classList.remove('good', 'warn', 'bad');
+  if (val >= badThresh) el.classList.add('bad');
+  else if (val >= warnThresh) el.classList.add('warn');
+  else el.classList.add('good');
+}
+
+function formatBytes(b) {
+  if (b < 1024) return b.toFixed ? b.toFixed(0) + ' B' : b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  return (b / 1048576).toFixed(1) + ' MB';
+}
+
+connectSignal();
+connectTcp();
+</script>
+</body>
+</html>

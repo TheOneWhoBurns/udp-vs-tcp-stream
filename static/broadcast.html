@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, user-scalable=no">
+<title>Broadcast</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#111;color:#eee;font-family:'Courier New',monospace;display:flex;flex-direction:column;align-items:center;padding:16px;height:100vh}
+video{display:none}
+canvas{width:100%;max-width:480px;border:1px solid #333;border-radius:4px}
+#status{margin-top:12px;font-size:14px;color:#0f0}
+.error{color:#f44}
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="status">Initializing camera...</div>
+<video id="video" playsinline autoplay muted></video>
+<script>
+const $ = id => document.getElementById(id);
+const status = $('status');
+const video = $('video');
+const canvas = $('canvas');
+const ctx = canvas.getContext('2d');
+
+const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+const base = `${proto}://${location.host}`;
+
+let signalWs, tcpWs, pc, recorder;
+
+function log(msg, err) {
+  status.textContent = msg;
+  if (err) status.classList.add('error');
+  else status.classList.remove('error');
+}
+
+async function start() {
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } },
+      audio: false
+    });
+  } catch (e) {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } },
+        audio: false
+      });
+    } catch (e2) {
+      log('Camera access denied: ' + e2.message, true);
+      return;
+    }
+  }
+
+  video.srcObject = stream;
+  await video.play();
+
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+
+  log('Camera ready. Waiting for viewer...');
+
+  const compositeStream = canvas.captureStream(30);
+
+  connectSignal(compositeStream);
+  connectTcp(compositeStream);
+  drawLoop();
+}
+
+function drawLoop() {
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const now = new Date();
+  const ts = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, canvas.height - 36, canvas.width, 36);
+  ctx.fillStyle = '#0f0';
+  ctx.font = 'bold 24px Courier New';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(ts, 8, canvas.height - 8);
+  requestAnimationFrame(drawLoop);
+}
+
+function connectSignal(compositeStream) {
+  signalWs = new WebSocket(`${base}/ws/signal?role=broadcaster`);
+  signalWs.onopen = () => log('Signal connected. Waiting for viewer...');
+  signalWs.onclose = () => setTimeout(() => connectSignal(compositeStream), 2000);
+  signalWs.onmessage = async (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'peer_joined') {
+      log('Viewer connected! Starting WebRTC...');
+      await startWebRTC(compositeStream);
+    } else if (msg.type === 'peer_left') {
+      log('Viewer disconnected. Waiting...');
+      if (pc) { pc.close(); pc = null; }
+    } else if (msg.type === 'answer') {
+      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(msg));
+    } else if (msg.type === 'ice') {
+      if (pc && msg.candidate) await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+    }
+  };
+}
+
+async function startWebRTC(compositeStream) {
+  if (pc) pc.close();
+  pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  compositeStream.getTracks().forEach(t => pc.addTrack(t, compositeStream));
+  pc.onicecandidate = (e) => {
+    if (e.candidate && signalWs.readyState === 1) {
+      signalWs.send(JSON.stringify({ type: 'ice', candidate: e.candidate }));
+    }
+  };
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  signalWs.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
+}
+
+function connectTcp(compositeStream) {
+  tcpWs = new WebSocket(`${base}/ws/tcp?role=broadcaster`);
+  tcpWs.binaryType = 'arraybuffer';
+  tcpWs.onopen = () => {};
+  tcpWs.onclose = () => setTimeout(() => connectTcp(compositeStream), 2000);
+  tcpWs.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'peer_joined') {
+      startRecorder(compositeStream);
+    } else if (msg.type === 'peer_left') {
+      stopRecorder();
+    }
+  };
+}
+
+function startRecorder(compositeStream) {
+  stopRecorder();
+  let mimeType = 'video/webm;codecs=vp8';
+  if (!MediaRecorder.isTypeSupported(mimeType)) {
+    mimeType = 'video/webm';
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = 'video/mp4';
+    }
+  }
+
+  if (tcpWs.readyState === 1) {
+    tcpWs.send(JSON.stringify({ type: 'codec', mimeType }));
+  }
+
+  recorder = new MediaRecorder(compositeStream, { mimeType, videoBitsPerSecond: 1_000_000 });
+  recorder.ondataavailable = (e) => {
+    if (e.data.size > 0 && tcpWs.readyState === 1) {
+      tcpWs.send(JSON.stringify({ type: 'ts', t: Date.now() }));
+      tcpWs.send(e.data);
+    }
+  };
+  recorder.start(200);
+  log('Streaming (WebRTC + TCP)');
+}
+
+function stopRecorder() {
+  if (recorder && recorder.state !== 'inactive') {
+    recorder.stop();
+    recorder = null;
+  }
+}
+
+start();
+</script>
+</body>
+</html>
