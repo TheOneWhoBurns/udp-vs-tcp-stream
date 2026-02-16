@@ -86,8 +86,9 @@ body{background:#0a0a0a;color:#ccc;font-family:'Courier New',monospace;min-heigh
       <div><span class="label">Nack sent</span><span class="value" id="s-nack">-</span></div>
       <div><span class="label">PLI sent</span><span class="value" id="s-pli">-</span></div>
       <div class="section-label">Simulation</div>
-      <div><span class="label">Sim loss</span><span class="value" id="s-simloss">off</span></div>
-      <div><span class="label">Frames dropped</span><span class="value" id="s-simdropped">0</span></div>
+      <div><span class="label">Target loss</span><span class="value" id="s-simloss">off</span></div>
+      <div><span class="label">Extra sim loss</span><span class="value" id="s-simextra">0%</span></div>
+      <div><span class="label">Sim frames dropped</span><span class="value" id="s-simdropped">0</span></div>
     </div>
   </div>
   <div class="panel tcp">
@@ -126,7 +127,7 @@ body{background:#0a0a0a;color:#ccc;font-family:'Courier New',monospace;min-heigh
   </div>
   <div class="sim-body">
     <div class="sim-field">
-      <span class="lbl">Loss</span>
+      <span class="lbl">Target</span>
       <input type="range" id="sim-loss" min="0" max="50" value="0" step="1">
       <span class="val" id="sim-loss-val">0%</span>
     </div>
@@ -166,6 +167,7 @@ const base = `${proto}://${location.host}`;
 let pc, signalWs, tcpWs;
 let sessionStart = 0;
 let udpSim = { loss_percent: 0, latency_ms: 0 };
+let udpNaturalLoss = 0;
 let udpSimDropped = 0;
 let tcpSimDropped = 0;
 
@@ -241,21 +243,26 @@ async function handleOffer(offer) {
     vid.srcObject = e.streams[0];
     $('udp-status').textContent = 'live';
 
-    if (vid._rvfc) return;
-    vid._rvfc = true;
-    let freezeUntil = 0;
-    function onFrame(now, metadata) {
-      if (udpSim.loss_percent > 0 && Math.random() * 100 < udpSim.loss_percent) {
+    if (vid._simTimer) return;
+    let burstRemaining = 0;
+    vid._simTimer = setInterval(() => {
+      if (burstRemaining > 0) {
+        burstRemaining--;
         udpSimDropped++;
         $('s-simdropped').textContent = udpSimDropped;
-        freezeUntil = performance.now() + 150;
         vid.pause();
-      } else if (performance.now() >= freezeUntil && vid.paused && vid.srcObject) {
-        vid.play();
+        if (burstRemaining === 0) setTimeout(() => { if (vid.srcObject) vid.play(); }, 150);
+        return;
       }
-      vid.requestVideoFrameCallback(onFrame);
-    }
-    vid.requestVideoFrameCallback(onFrame);
+      const extra = Math.max(0, udpSim.loss_percent - udpNaturalLoss);
+      if (extra <= 0) {
+        if (vid.paused && vid.srcObject) vid.play();
+        return;
+      }
+      if (Math.random() * 100 < extra) {
+        burstRemaining = 1 + Math.floor(Math.random() * 3);
+      }
+    }, 200);
   };
   pc.onicecandidate = (e) => {
     if (e.candidate && signalWs.readyState === 1) {
@@ -280,7 +287,8 @@ setInterval(async () => {
         $('s-pkts').textContent = recv;
         $('s-lost').textContent = lost;
         const total = recv + lost;
-        const lossRate = total > 0 ? ((lost / total) * 100).toFixed(2) + '%' : '0%';
+        udpNaturalLoss = total > 0 ? (lost / total) * 100 : 0;
+        const lossRate = total > 0 ? udpNaturalLoss.toFixed(2) + '%' : '0%';
         $('s-lossrate').textContent = lossRate;
         colorize('s-lossrate', lost / Math.max(total, 1), 0.01, 0.05);
 
@@ -329,6 +337,7 @@ setInterval(async () => {
       graphHistory.udp.push(estLat);
       if (graphHistory.udp.length > graphHistory.maxPoints) graphHistory.udp.shift();
     }
+    if (udpSim.loss_percent > 0) updateSimMetrics();
   } catch {}
 }, 1000);
 
@@ -614,6 +623,9 @@ function updateSimMetrics() {
   $('sim-active-label').style.display = active ? 'inline' : 'none';
   $('s-simloss').textContent = loss > 0 ? loss + '%' : 'off';
   $('s-simloss').className = 'value' + (loss > 0 ? ' warn' : '');
+  const extra = Math.max(0, loss - udpNaturalLoss).toFixed(1);
+  $('s-simextra').textContent = loss > 0 ? extra + '%' : '0%';
+  $('s-simextra').className = 'value' + (parseFloat(extra) > 0 ? ' warn' : '');
   $('t-simloss').textContent = loss > 0 ? loss + '%' : 'off';
   $('t-simloss').className = 'value' + (loss > 0 ? ' warn' : '');
   $('t-simdelay').textContent = delay > 0 ? delay + ' ms' : 'off';
@@ -644,9 +656,9 @@ $('sim-delay').addEventListener('input', pushSimConfig);
 function applyPreset(name) {
   const presets = {
     clear: [0, 0],
-    wifi: [8, 30],
-    '3g': [15, 300],
-    sat: [5, 600]
+    wifi: [3, 20],
+    '3g': [5, 150],
+    sat: [2, 500]
   };
   const [loss, delay] = presets[name] || [0, 0];
   $('sim-loss').value = loss;

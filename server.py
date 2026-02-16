@@ -125,6 +125,7 @@ async def handle_tcp_ws(request):
 
     try:
         pending_ts = None
+        burst_remaining = 0
         async for msg in ws:
             targets = viewers_tcp if role == "broadcaster" else broadcasters_tcp
 
@@ -146,7 +147,17 @@ async def handle_tcp_ws(request):
 
                 if msg.type == web.WSMsgType.BINARY:
                     cfg = sim_config
+                    if burst_remaining > 0:
+                        burst_remaining -= 1
+                        pending_ts = None
+                        for t in list(targets):
+                            try:
+                                await t.send_json({"type": "sim_drop"})
+                            except Exception:
+                                targets.discard(t)
+                        continue
                     if cfg["loss_percent"] > 0 and random.random() * 100 < cfg["loss_percent"]:
+                        burst_remaining = random.randint(1, 2)
                         pending_ts = None
                         for t in list(targets):
                             try:
