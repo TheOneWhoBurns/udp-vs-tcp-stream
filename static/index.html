@@ -20,6 +20,7 @@ body{background:#0a0a0a;color:#ccc;font-family:'Courier New',monospace;min-heigh
 .vid-wrap{resize:vertical;overflow:hidden;height:180px;min-height:60px;max-height:600px;position:relative;background:#000}
 .vid-wrap video{width:100%;height:100%;object-fit:contain;display:block}
 .vid-wrap::after{content:'';position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:40px;height:4px;background:#444;border-radius:2px;margin-bottom:2px;pointer-events:none}
+.vid-wrap canvas.corrupt-overlay{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1}
 .stats{padding:6px 10px;font-size:10px;line-height:1.5;background:#0d0d0d;border-top:1px solid #222}
 .stats div{display:flex;justify-content:space-between}
 .stats .label{color:#888}
@@ -62,10 +63,48 @@ body{background:#0a0a0a;color:#ccc;font-family:'Courier New',monospace;min-heigh
   <div class="hint">Scan QR code with phone to start broadcasting</div>
 </div>
 
+<div id="sim-controls">
+  <div class="sim-header">
+    <span class="sim-title">Network Simulation</span>
+    <span class="sim-active" id="sim-active-label">ACTIVE</span>
+  </div>
+  <div class="sim-body">
+    <div class="sim-field">
+      <span class="lbl">Target</span>
+      <input type="range" id="sim-loss" min="0" max="50" value="0" step="1">
+      <span class="val" id="sim-loss-val">0%</span>
+    </div>
+    <div class="sim-field">
+      <span class="lbl">Delay</span>
+      <input type="range" id="sim-delay" min="0" max="1000" value="0" step="25">
+      <span class="val" id="sim-delay-val">0 ms</span>
+    </div>
+    <div class="sim-presets">
+      <button onclick="applyPreset('clear')">Clear</button>
+      <button onclick="applyPreset('wifi')">Lossy WiFi</button>
+      <button onclick="applyPreset('3g')">Bad 3G</button>
+      <button onclick="applyPreset('sat')">Satellite</button>
+    </div>
+  </div>
+</div>
+
+<div id="bottom">
+  <div id="delta-bar">Latency delta: <span id="delta-value">measuring...</span></div>
+  <div id="summary-stats">
+    <div class="col"><div class="big udp-color" id="sum-udp-lat">-</div><div class="lbl">UDP latency</div></div>
+    <div class="col"><div class="big tcp-color" id="sum-tcp-lat">-</div><div class="lbl">TCP latency</div></div>
+    <div class="col"><div class="big" id="sum-ratio">-</div><div class="lbl">TCP / UDP ratio</div></div>
+    <div class="col"><div class="big" id="sum-timelost">-</div><div class="lbl">Extra TCP delay (cumul.)</div></div>
+    <div class="col"><div class="big" id="sum-pktloss">-</div><div class="lbl">UDP pkt loss</div></div>
+    <div class="col"><div class="big" id="sum-uptime">-</div><div class="lbl">Session time</div></div>
+  </div>
+  <canvas id="latency-graph"></canvas>
+</div>
+
 <div id="streams">
   <div class="panel udp">
     <div class="panel-header"><span>UDP (WebRTC)</span><span id="udp-status">waiting</span></div>
-    <div class="vid-wrap"><video id="udp-video" autoplay playsinline muted></video></div>
+    <div class="vid-wrap"><video id="udp-video" autoplay playsinline muted></video><canvas id="udp-corrupt" class="corrupt-overlay"></canvas></div>
     <div class="stats" id="udp-stats">
       <div class="section-label">Transport</div>
       <div><span class="label">Packets recv</span><span class="value" id="s-pkts">-</span></div>
@@ -118,44 +157,6 @@ body{background:#0a0a0a;color:#ccc;font-family:'Courier New',monospace;min-heigh
       <div><span class="label">Chunks dropped</span><span class="value" id="t-simdropped">0</span></div>
     </div>
   </div>
-</div>
-
-<div id="sim-controls">
-  <div class="sim-header">
-    <span class="sim-title">Network Simulation</span>
-    <span class="sim-active" id="sim-active-label">ACTIVE</span>
-  </div>
-  <div class="sim-body">
-    <div class="sim-field">
-      <span class="lbl">Target</span>
-      <input type="range" id="sim-loss" min="0" max="50" value="0" step="1">
-      <span class="val" id="sim-loss-val">0%</span>
-    </div>
-    <div class="sim-field">
-      <span class="lbl">Delay</span>
-      <input type="range" id="sim-delay" min="0" max="1000" value="0" step="25">
-      <span class="val" id="sim-delay-val">0 ms</span>
-    </div>
-    <div class="sim-presets">
-      <button onclick="applyPreset('clear')">Clear</button>
-      <button onclick="applyPreset('wifi')">Lossy WiFi</button>
-      <button onclick="applyPreset('3g')">Bad 3G</button>
-      <button onclick="applyPreset('sat')">Satellite</button>
-    </div>
-  </div>
-</div>
-
-<div id="bottom">
-  <div id="delta-bar">Latency delta: <span id="delta-value">measuring...</span></div>
-  <div id="summary-stats">
-    <div class="col"><div class="big udp-color" id="sum-udp-lat">-</div><div class="lbl">UDP latency</div></div>
-    <div class="col"><div class="big tcp-color" id="sum-tcp-lat">-</div><div class="lbl">TCP latency</div></div>
-    <div class="col"><div class="big" id="sum-ratio">-</div><div class="lbl">TCP / UDP ratio</div></div>
-    <div class="col"><div class="big" id="sum-timelost">-</div><div class="lbl">Extra TCP delay (cumul.)</div></div>
-    <div class="col"><div class="big" id="sum-pktloss">-</div><div class="lbl">UDP pkt loss</div></div>
-    <div class="col"><div class="big" id="sum-uptime">-</div><div class="lbl">Session time</div></div>
-  </div>
-  <canvas id="latency-graph"></canvas>
 </div>
 
 <script>
@@ -244,23 +245,58 @@ async function handleOffer(offer) {
     $('udp-status').textContent = 'live';
 
     if (vid._simTimer) return;
+    const overlay = $('udp-corrupt');
+    const octx = overlay.getContext('2d');
     let burstRemaining = 0;
+    let staleBlocks = [];
+    const BLOCK = 32;
+
     vid._simTimer = setInterval(() => {
       if (burstRemaining > 0) {
         burstRemaining--;
         udpSimDropped++;
         $('s-simdropped').textContent = udpSimDropped;
-        vid.pause();
-        if (burstRemaining === 0) setTimeout(() => { if (vid.srcObject) vid.play(); }, 150);
+        if (burstRemaining === 0) {
+          setTimeout(() => { octx.clearRect(0, 0, overlay.width, overlay.height); staleBlocks = []; }, 150);
+        }
         return;
       }
+
+      if (staleBlocks.length > 0) return;
+
       const extra = Math.max(0, udpSim.loss_percent - udpNaturalLoss);
-      if (extra <= 0) {
-        if (vid.paused && vid.srcObject) vid.play();
-        return;
-      }
+      if (extra <= 0) return;
+
       if (Math.random() * 100 < extra) {
         burstRemaining = 1 + Math.floor(Math.random() * 3);
+        const vw = vid.videoWidth || 640;
+        const vh = vid.videoHeight || 480;
+        overlay.width = vw;
+        overlay.height = vh;
+        octx.clearRect(0, 0, vw, vh);
+        octx.drawImage(vid, 0, 0, vw, vh);
+        const snapshot = octx.getImageData(0, 0, vw, vh);
+        octx.clearRect(0, 0, vw, vh);
+        const numBlocks = 4 + Math.floor(Math.random() * 5);
+        for (let i = 0; i < numBlocks; i++) {
+          const bx = Math.floor(Math.random() * (vw / BLOCK)) * BLOCK;
+          const by = Math.floor(Math.random() * (vh / BLOCK)) * BLOCK;
+          const bw = Math.min(BLOCK, vw - bx);
+          const bh = Math.min(BLOCK, vh - by);
+          const blockData = octx.createImageData(bw, bh);
+          for (let y = 0; y < bh; y++) {
+            for (let x = 0; x < bw; x++) {
+              const si = ((by + y) * vw + (bx + x)) * 4;
+              const di = (y * bw + x) * 4;
+              blockData.data[di] = snapshot.data[si];
+              blockData.data[di+1] = snapshot.data[si+1];
+              blockData.data[di+2] = snapshot.data[si+2];
+              blockData.data[di+3] = 255;
+            }
+          }
+          octx.putImageData(blockData, bx, by);
+          staleBlocks.push({bx, by, bw, bh});
+        }
       }
     }, 200);
   };
