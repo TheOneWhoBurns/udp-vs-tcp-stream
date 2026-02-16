@@ -243,13 +243,15 @@ async function handleOffer(offer) {
 
     if (vid._rvfc) return;
     vid._rvfc = true;
+    let freezeUntil = 0;
     function onFrame(now, metadata) {
       if (udpSim.loss_percent > 0 && Math.random() * 100 < udpSim.loss_percent) {
         udpSimDropped++;
         $('s-simdropped').textContent = udpSimDropped;
-        vid.style.opacity = '0.3';
-      } else {
-        vid.style.opacity = '1';
+        freezeUntil = performance.now() + 150;
+        vid.pause();
+      } else if (performance.now() >= freezeUntil && vid.paused && vid.srcObject) {
+        vid.play();
       }
       vid.requestVideoFrameCallback(onFrame);
     }
