@@ -10,10 +10,12 @@
 import asyncio
 import io
 import json
+import random
 import socket
 import ssl
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 import qrcode
@@ -52,6 +54,8 @@ viewers_signal = set()
 broadcasters_signal = set()
 viewers_tcp = set()
 broadcasters_tcp = set()
+
+sim_config = {"loss_percent": 0, "latency_ms": 0}
 
 
 async def handle_signal_ws(request):
@@ -120,8 +124,59 @@ async def handle_tcp_ws(request):
         await notify_broadcaster_if_viewer_present(ws, broadcasters_tcp)
 
     try:
+        pending_ts = None
         async for msg in ws:
             targets = viewers_tcp if role == "broadcaster" else broadcasters_tcp
+
+            if role == "broadcaster":
+                if msg.type == web.WSMsgType.TEXT:
+                    try:
+                        data = json.loads(msg.data)
+                    except Exception:
+                        data = {}
+                    if data.get("type") == "ts":
+                        pending_ts = msg.data
+                        continue
+                    for t in list(targets):
+                        try:
+                            await t.send_str(msg.data)
+                        except Exception:
+                            targets.discard(t)
+                    continue
+
+                if msg.type == web.WSMsgType.BINARY:
+                    cfg = sim_config
+                    if cfg["loss_percent"] > 0 and random.random() * 100 < cfg["loss_percent"]:
+                        pending_ts = None
+                        for t in list(targets):
+                            try:
+                                await t.send_json({"type": "sim_drop"})
+                            except Exception:
+                                targets.discard(t)
+                        continue
+
+                    ts_data = pending_ts
+                    bin_data = msg.data
+                    pending_ts = None
+                    delay = cfg["latency_ms"] / 1000.0 if cfg["latency_ms"] > 0 else 0
+
+                    async def relay(ts_d, bin_d, tgts, d):
+                        if d > 0:
+                            await asyncio.sleep(d)
+                        for t in list(tgts):
+                            try:
+                                if ts_d:
+                                    await t.send_str(ts_d)
+                                await t.send_bytes(bin_d)
+                            except Exception:
+                                tgts.discard(t)
+
+                    if delay > 0:
+                        asyncio.create_task(relay(ts_data, bin_data, targets, delay))
+                    else:
+                        await relay(ts_data, bin_data, targets, 0)
+                    continue
+
             for t in list(targets):
                 try:
                     if msg.type == web.WSMsgType.BINARY:
@@ -165,11 +220,30 @@ async def handle_broadcast_url(request):
     return web.json_response({"url": url})
 
 
+async def handle_simulate_get(request):
+    return web.json_response(sim_config)
+
+
+async def handle_simulate_post(request):
+    data = await request.json()
+    for k in ("loss_percent", "latency_ms"):
+        if k in data:
+            sim_config[k] = max(0, int(data[k]))
+    for v in list(viewers_tcp):
+        try:
+            await v.send_json({"type": "sim_config", **sim_config})
+        except Exception:
+            pass
+    return web.json_response(sim_config)
+
+
 app = web.Application()
 app.router.add_get("/", lambda r: web.FileResponse(STATIC / "index.html"))
 app.router.add_get("/broadcast", lambda r: web.FileResponse(STATIC / "broadcast.html"))
 app.router.add_get("/qr", handle_qr)
 app.router.add_get("/broadcast-url", handle_broadcast_url)
+app.router.add_get("/api/simulate", handle_simulate_get)
+app.router.add_post("/api/simulate", handle_simulate_post)
 app.router.add_get("/ws/signal", handle_signal_ws)
 app.router.add_get("/ws/tcp", handle_tcp_ws)
 app.router.add_static("/static/", STATIC)
