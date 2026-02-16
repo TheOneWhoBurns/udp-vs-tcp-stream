@@ -17,7 +17,9 @@ body{background:#0a0a0a;color:#ccc;font-family:'Courier New',monospace;min-heigh
 .panel-header{padding:6px 12px;font-size:13px;font-weight:bold;display:flex;justify-content:space-between;align-items:center}
 .udp .panel-header{background:#1a3a1a;color:#4c4}
 .tcp .panel-header{background:#1a1a3a;color:#66f}
-.panel video{width:100%;background:#000;flex:1;min-height:0;object-fit:contain}
+.vid-wrap{resize:vertical;overflow:hidden;height:180px;min-height:60px;max-height:600px;position:relative;background:#000}
+.vid-wrap video{width:100%;height:100%;object-fit:contain;display:block}
+.vid-wrap::after{content:'';position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:40px;height:4px;background:#444;border-radius:2px;margin-bottom:2px;pointer-events:none}
 .stats{padding:6px 10px;font-size:10px;line-height:1.5;background:#0d0d0d;border-top:1px solid #222}
 .stats div{display:flex;justify-content:space-between}
 .stats .label{color:#888}
@@ -37,6 +39,18 @@ body{background:#0a0a0a;color:#ccc;font-family:'Courier New',monospace;min-heigh
 .udp-color{color:#4c4}
 .tcp-color{color:#66f}
 #latency-graph{width:100%;height:60px;margin-top:6px;border:1px solid #222;border-radius:3px;background:#0a0a0a}
+#sim-controls{display:none;background:#131313;border-top:1px solid #222;border-bottom:1px solid #222;padding:8px 12px}
+.sim-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.sim-title{color:#888;font-size:11px;text-transform:uppercase;letter-spacing:1px}
+.sim-active{color:#f44;font-size:10px;font-weight:bold;display:none}
+.sim-body{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.sim-field{display:flex;align-items:center;gap:6px;font-size:11px}
+.sim-field .lbl{color:#888;width:50px}
+.sim-field input[type=range]{width:120px;accent-color:#f80}
+.sim-field .val{color:#eee;width:60px;text-align:right;font-variant-numeric:tabular-nums}
+.sim-presets{display:flex;gap:4px;margin-left:8px}
+.sim-presets button{background:#222;color:#aaa;border:1px solid #333;border-radius:3px;padding:2px 8px;font-size:10px;font-family:inherit;cursor:pointer}
+.sim-presets button:hover{background:#333;color:#fff}
 </style>
 </head>
 <body>
@@ -51,7 +65,7 @@ body{background:#0a0a0a;color:#ccc;font-family:'Courier New',monospace;min-heigh
 <div id="streams">
   <div class="panel udp">
     <div class="panel-header"><span>UDP (WebRTC)</span><span id="udp-status">waiting</span></div>
-    <video id="udp-video" autoplay playsinline muted></video>
+    <div class="vid-wrap"><video id="udp-video" autoplay playsinline muted></video></div>
     <div class="stats" id="udp-stats">
       <div class="section-label">Transport</div>
       <div><span class="label">Packets recv</span><span class="value" id="s-pkts">-</span></div>
@@ -71,11 +85,14 @@ body{background:#0a0a0a;color:#ccc;font-family:'Courier New',monospace;min-heigh
       <div><span class="label">Frames dropped</span><span class="value" id="s-fdrop">-</span></div>
       <div><span class="label">Nack sent</span><span class="value" id="s-nack">-</span></div>
       <div><span class="label">PLI sent</span><span class="value" id="s-pli">-</span></div>
+      <div class="section-label">Simulation</div>
+      <div><span class="label">Sim loss</span><span class="value" id="s-simloss">off</span></div>
+      <div><span class="label">Frames dropped</span><span class="value" id="s-simdropped">0</span></div>
     </div>
   </div>
   <div class="panel tcp">
     <div class="panel-header"><span>TCP (WebSocket + MSE)</span><span id="tcp-status">waiting</span></div>
-    <video id="tcp-video" autoplay playsinline muted></video>
+    <div class="vid-wrap"><video id="tcp-video" autoplay playsinline muted></video></div>
     <div class="stats" id="tcp-stats">
       <div class="section-label">Transport</div>
       <div><span class="label">Chunks recv</span><span class="value" id="t-chunks">-</span></div>
@@ -94,6 +111,35 @@ body{background:#0a0a0a;color:#ccc;font-family:'Courier New',monospace;min-heigh
       <div><span class="label">Seek corrections</span><span class="value" id="t-seeks">-</span></div>
       <div><span class="label">Playback rate</span><span class="value" id="t-rate">-</span></div>
       <div><span class="label">Buffer stalls</span><span class="value" id="t-stalls">-</span></div>
+      <div class="section-label">Simulation</div>
+      <div><span class="label">Sim loss</span><span class="value" id="t-simloss">off</span></div>
+      <div><span class="label">Sim delay</span><span class="value" id="t-simdelay">off</span></div>
+      <div><span class="label">Chunks dropped</span><span class="value" id="t-simdropped">0</span></div>
+    </div>
+  </div>
+</div>
+
+<div id="sim-controls">
+  <div class="sim-header">
+    <span class="sim-title">Network Simulation</span>
+    <span class="sim-active" id="sim-active-label">ACTIVE</span>
+  </div>
+  <div class="sim-body">
+    <div class="sim-field">
+      <span class="lbl">Loss</span>
+      <input type="range" id="sim-loss" min="0" max="50" value="0" step="1">
+      <span class="val" id="sim-loss-val">0%</span>
+    </div>
+    <div class="sim-field">
+      <span class="lbl">Delay</span>
+      <input type="range" id="sim-delay" min="0" max="1000" value="0" step="25">
+      <span class="val" id="sim-delay-val">0 ms</span>
+    </div>
+    <div class="sim-presets">
+      <button onclick="applyPreset('clear')">Clear</button>
+      <button onclick="applyPreset('wifi')">Lossy WiFi</button>
+      <button onclick="applyPreset('3g')">Bad 3G</button>
+      <button onclick="applyPreset('sat')">Satellite</button>
     </div>
   </div>
 </div>
@@ -119,6 +165,9 @@ const base = `${proto}://${location.host}`;
 
 let pc, signalWs, tcpWs;
 let sessionStart = 0;
+let udpSim = { loss_percent: 0, latency_ms: 0 };
+let udpSimDropped = 0;
+let tcpSimDropped = 0;
 
 let udpMetrics = {
   prevBytes: 0, prevFrames: 0, prevTs: 0,
@@ -150,6 +199,7 @@ updateClock();
 function showStreams() {
   $('setup').style.display = 'none';
   $('streams').style.display = 'flex';
+  $('sim-controls').style.display = 'block';
   $('bottom').style.display = 'block';
   if (!sessionStart) sessionStart = Date.now();
 }
@@ -157,6 +207,7 @@ function showStreams() {
 function hideStreams() {
   $('setup').style.display = 'flex';
   $('streams').style.display = 'none';
+  $('sim-controls').style.display = 'none';
   $('bottom').style.display = 'none';
 }
 
@@ -186,8 +237,23 @@ async function handleOffer(offer) {
   if (pc) pc.close();
   pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
   pc.ontrack = (e) => {
-    $('udp-video').srcObject = e.streams[0];
+    const vid = $('udp-video');
+    vid.srcObject = e.streams[0];
     $('udp-status').textContent = 'live';
+
+    if (vid._rvfc) return;
+    vid._rvfc = true;
+    function onFrame(now, metadata) {
+      if (udpSim.loss_percent > 0 && Math.random() * 100 < udpSim.loss_percent) {
+        udpSimDropped++;
+        $('s-simdropped').textContent = udpSimDropped;
+        vid.style.opacity = '0.3';
+      } else {
+        vid.style.opacity = '1';
+      }
+      vid.requestVideoFrameCallback(onFrame);
+    }
+    vid.requestVideoFrameCallback(onFrame);
   };
   pc.onicecandidate = (e) => {
     if (e.candidate && signalWs.readyState === 1) {
@@ -283,6 +349,13 @@ function connectTcp() {
         setupMse(msg.mimeType);
       } else if (msg.type === 'ts') {
         nextTimestamp = msg.t;
+      } else if (msg.type === 'sim_drop') {
+        tcpSimDropped++;
+        $('t-simdropped').textContent = tcpSimDropped;
+      } else if (msg.type === 'sim_config') {
+        udpSim.loss_percent = msg.loss_percent || 0;
+        udpSim.latency_ms = msg.latency_ms || 0;
+        updateSimMetrics();
       }
     } else {
       handleTcpChunk(e.data);
@@ -530,6 +603,53 @@ function formatBytes(b) {
   if (b < 1024) return b.toFixed ? b.toFixed(0) + ' B' : b + ' B';
   if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
   return (b / 1048576).toFixed(1) + ' MB';
+}
+
+function updateSimMetrics() {
+  const loss = udpSim.loss_percent;
+  const delay = udpSim.latency_ms;
+  const active = loss > 0 || delay > 0;
+  $('sim-active-label').style.display = active ? 'inline' : 'none';
+  $('s-simloss').textContent = loss > 0 ? loss + '%' : 'off';
+  $('s-simloss').className = 'value' + (loss > 0 ? ' warn' : '');
+  $('t-simloss').textContent = loss > 0 ? loss + '%' : 'off';
+  $('t-simloss').className = 'value' + (loss > 0 ? ' warn' : '');
+  $('t-simdelay').textContent = delay > 0 ? delay + ' ms' : 'off';
+  $('t-simdelay').className = 'value' + (delay > 0 ? ' warn' : '');
+}
+
+let simDebounce = null;
+function pushSimConfig() {
+  const loss = parseInt($('sim-loss').value);
+  const delay = parseInt($('sim-delay').value);
+  $('sim-loss-val').textContent = loss + '%';
+  $('sim-delay-val').textContent = delay > 0 ? delay + ' ms' : '0 ms';
+  udpSim.loss_percent = loss;
+  udpSim.latency_ms = delay;
+  updateSimMetrics();
+  clearTimeout(simDebounce);
+  simDebounce = setTimeout(() => {
+    fetch('/api/simulate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ loss_percent: loss, latency_ms: delay })
+    });
+  }, 200);
+}
+$('sim-loss').addEventListener('input', pushSimConfig);
+$('sim-delay').addEventListener('input', pushSimConfig);
+
+function applyPreset(name) {
+  const presets = {
+    clear: [0, 0],
+    wifi: [8, 30],
+    '3g': [15, 300],
+    sat: [5, 600]
+  };
+  const [loss, delay] = presets[name] || [0, 0];
+  $('sim-loss').value = loss;
+  $('sim-delay').value = delay;
+  pushSimConfig();
 }
 
 connectSignal();
